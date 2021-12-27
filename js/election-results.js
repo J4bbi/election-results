@@ -57,12 +57,25 @@ class Ward {
         this.rejected_votes = undefined;
         this.quota = undefined;
         this.data = undefined;
-        this.canvas = {};
+        this.canvas = { "bars": [] };
         this.stage = 1;
 
         this.load_file(filename);
 
         //this.draw_first_stage();
+    }
+
+    get_candidate(number) {
+        for(let i = 0; i < this.candidates.length; i++) {
+            if(this.candidates[i].number === number)
+                return this.candidates[i]
+        }
+    }
+
+    get_non_transferable_votes(candidate) {
+        return this.data.filter((v) => v[1] === candidate.number && v.length === 2)
+            .reduce((previousValue, currentValue) => previousValue + currentValue[0], 0);
+
     }
 
     load_file(filename) {
@@ -96,8 +109,10 @@ class Ward {
 
             }
 
-            let voting_patterns = newline_data.slice(candidateIndex, (candidateIndex + this.no_data_lines));
-            voting_patterns.unshift(['votes', 'one', 'two', 'three', 'four', 'five'])
+            // The data contains an extra 0 at the end of each voting patterns to indicate
+            // end of data. Remap the data removing the last two characters to get rid of that.
+            let voting_patterns = newline_data.slice(candidateIndex - 1, (candidateIndex + this.no_data_lines))
+                .map((v) => v.substring(0, v.length - 2));
 
             // Parsing the data makes it an array of array of ints
             this.data = d3.dsvFormat(" ").parseRows(voting_patterns.join("\n"), d3.autoType);
@@ -151,6 +166,11 @@ class Ward {
             .attr("id", "header")
             .text(this.name + ", stage: " + this.stage);
 
+        this.canvas.g.append("text")
+            .attr("id", "subheader")
+            .attr("transform", "translate(0,15)")
+            .text("Seats: " + this.seats + " Electorate: " + this.electorate);
+
         this.canvas.x = d3.scaleLinear()
             .range([0, width])
             .domain([0, d3.max(data, (d) => d.value)]);
@@ -171,13 +191,13 @@ class Ward {
             .attr("transform", "translate(0,30)")
             .call(this.canvas.yAxis);
 
-        this.canvas.bars = svg.selectAll(".bar")
+        this.canvas.bars[0] = svg.selectAll(".bar")
             .data(data)
             .enter()
             .append("g")
 
         //append rects
-        this.canvas.bars.append("rect")
+        this.canvas.bars[0].append("rect")
             .attr("class", "bar")
             .attr("y", (d) => this.canvas.y(d.name) + 30 )
             .attr("height", this.canvas.y.bandwidth())
@@ -190,7 +210,7 @@ class Ward {
             .attr("width", (d) => this.canvas.x(d.value));
 
         //add a value label to the right of each bar
-        this.canvas.bars.append("text")
+        this.canvas.bars[0].append("text")
             .attr("class", "label")
             //y position of the label is halfway down the bar
             .attr("y", (d) => this.canvas.y(d.name) + this.canvas.y.bandwidth() / 2 + 34)
@@ -231,13 +251,119 @@ class Ward {
 
     next_stage() {
         d3.select("#header").text(this.name + ", stage: " + this.stage);
-        console.log(this.stage);
+
+        // Array of number and value for each candidate sorted in ascending order by value
+        // last element is candidate with most votes, first element with fewest
+        let sorted_candidates = this.candidates.map((c) => ({ "number": c.number, "value": c.preference[this.stage-2]}))
+            .sort((a, b) => a.value - b.value);
+
+        if(sorted_candidates[sorted_candidates.length -1].value > this.quota) {
+            let candidate = this.get_candidate(sorted_candidates[sorted_candidates.length -1].number);
+            let total_votes = candidate.preference[this.stage - 2];
+            let surplus_votes = total_votes - this.quota;
+            let weight = surplus_votes / (total_votes - this.get_non_transferable_votes(candidate));
+
+            console.log(candidate, surplus_votes, +weight.toFixed(5));
+
+            this.candidates.forEach((c) => c.preference[this.stage-1] = c.preference[this.stage-2])
+
+            candidate.preference[this.stage - 1] = this.quota;
+
+            /*let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2)
+
+            // x preference round
+            for(let i = 1; i < stage_data.length; i++) {
+                let c = stage_data[i][this.stage] - 1;
+                this.candidates[c].preference[this.stage - 1] += this.data[i][0] * weight;
+            }*/
+
+            let data = this.candidates.map(((c) => ({ "name": c.name,
+                "party": c.party,
+                "percentage": Math.floor((c.preference[this.stage -1]/this.valid_votes) * 1000) / 10,
+                "value": c.preference[this.stage - 1]})));
+
+            this.canvas.bars[this.stage - 2] = svg.selectAll(".bar")
+                .data(data)
+                .join()
+                .transition()
+                .duration(700)
+                .ease(d3.easeExpOut)
+                .attr("width", (d) => this.canvas.x(d.value));
+
+            let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2);
+
+            // x preference round
+            for(let i = 1; i < stage_data.length; i++) {
+                let c = stage_data[i][this.stage] - 1;
+                this.candidates[c].preference[this.stage - 1] += +(this.data[i][0] * weight).toFixed(5);
+            }
+
+            data = this.candidates.filter((c) => c.number !== candidate.number).map(((c) => ({ "name": c.name,
+                "party": candidate.party, // c.party,
+                "percentage": Math.floor((c.preference[this.stage -1]/this.valid_votes) * 1000) / 10,
+                "value": c.preference[this.stage - 1] - c.preference[this.stage - 2],
+                "prev_value": c.preference[this.stage - 2],
+            })));
+
+            this.canvas.bars[this.stage - 1] = svg.selectAll(".bar-" + this.stage)
+                .data(data)
+                .enter()
+                .append("g")
+
+            //append rects
+            this.canvas.bars[this.stage - 1].append("rect")
+                .attr("class", "bar-" + this.stage)
+                .attr("y", (d) => this.canvas.y(d.name) + 30 )
+                .attr("height", this.canvas.y.bandwidth())
+                .attr("fill", (d) => getBackgroundColor(d.party))
+                .attr("x", (d) => this.canvas.x(d.prev_value))
+                .attr("width", 0)
+                .transition()
+                .duration(700)
+                .ease(d3.easeExpOut)
+                .attr("width", (d) => this.canvas.x(d.value));
+
+            data = this.candidates.map(((c) => ({ "name": c.name,
+                "party": c.party,
+                "percentage": Math.floor((c.preference[0]/this.valid_votes) * 1000) / 10,
+                "value": c.preference[this.stage - 1]})))
+
+            let texts = svg.selectAll(".label")
+                .data(data)
+                .join()
+                .attr("x", (d) => this.canvas.x(d.value) + 3)
+                .text((d) => Math.floor(d.value) + " (" + d.percentage + "%)");
+
+            d3.select("#subheader")
+                .text("Transferring " + surplus_votes + " votes from " + candidate.name + ".");
+
+
+        }
+        else {
+            let eliminated_candidate = this.get_candidate(sorted_candidates[0].number);
+
+            d3.select("#subheader")
+                .text("Transferring " + eliminated_candidate.number + " votes from eliminated candidate " + eliminated_candidate.name + ".");
+        }
+
+        let successful_candidates = []
+        // Check who's elected after first preference
+        this.candidates.forEach((c) => (c.preference[0] >= this.quota) ? successful_candidates.push(c.number): void(0))
+
+        if(successful_candidates.length < this.seats)   {
+            this.stage += 1;
+            d3.select("#button").text("Stage " + this.stage);
+        }
+        else {
+            d3.select("#button").style("display", "none");
+            d3.select("#info").text("All " + this.seats + " seats filled in stage " + this.stage + ".");
+        }
 
     }
 }
 
 
 ward = new Ward("Torry-Ferryhill.dat")
-//ward = new Ward("Southside-Newington-2017.dat")
+//ward = new Ward("Southside-Newington.dat")
 console.log(ward);
 

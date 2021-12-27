@@ -13,6 +13,11 @@ body {
     /*fill: #5f89ad;*/
 }
 
+.bar-2 {
+    stroke: #fff;
+    stroke-width: 1;
+}
+
 .axis {
     font-size: 13px;
 }
@@ -41,6 +46,10 @@ button {
     text-align: center;
 }
 
-.header {
+#header {
     font-weight: bold;
+}
+
+#subheader {
+    font-size: 10px;
 }
