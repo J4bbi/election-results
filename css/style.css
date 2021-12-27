@@ -1,0 +1,46 @@
+svg {
+    display: block;
+    margin: auto;
+/*    width: 800px;
+    height: 600px;*/
+}
+
+body {
+    font-family: "Arial", sans-serif;
+}
+
+.bar {
+    /*fill: #5f89ad;*/
+}
+
+.axis {
+    font-size: 13px;
+}
+
+.axis path,
+.axis line {
+    fill: none;
+    display: none;
+}
+
+.label {
+    font-size: 13px;
+}
+
+line {
+    stroke: #000;
+    stroke-width: 1;
+}
+
+button {
+    display: none;
+    margin: auto;
+}
+
+#info {
+    text-align: center;
+}
+
+.header {
+    font-weight: bold;
+}
