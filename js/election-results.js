@@ -67,6 +67,7 @@ class Ward {
         this.data = undefined;
         this.canvas = { };
         this.stage = 1;
+        this.stage_candidate = undefined;
 
         this.load_file(filename);
 
@@ -78,13 +79,25 @@ class Ward {
     }
 
     get_data() {
-        return this.candidates.map(((c) => ({
+        let candidates = JSON.parse(JSON.stringify(this.candidates))
+
+        candidates.forEach(function(c) {
+            for (let i = 0; i < c.votes.length; i++) {
+                if (c.votes[i] < 0) {
+                    c.votes[i - 1] += c.votes[i];
+                    c.votes.splice(i, 1);
+                }
+
+            }
+        });
+
+        return candidates.map(((c) => ({
             "number": c.number,
             "name": c.name,
             "party": c.party,
-            "total_votes": c.total_votes,
-            "percentage": Math.floor((c.total_votes/this.valid_votes) * 1000) / 10,
-            "stages": c.votes
+            "total_votes": c.votes.reduce((a, b) => a + b),
+            "percentage": Math.floor((c.votes.reduce((a, b) => a + b)/this.valid_votes) * 1000) / 10,
+            "stages": c.votes.map((v, i, a) => ({"cumulative_votes": (i) ? a.slice(0, i).reduce((w,y) => w + y) : v, "votes": v, "candidate": c.number}))
         })))
     }
 
@@ -199,6 +212,7 @@ class Ward {
         this.candidates.sort((a, b) => a.total_votes - b.total_votes);
 
         if(this.candidates[this.candidates.length -1].total_votes > this.quota) {
+            this.stage_candidate = this.candidates[this.candidates.length -1].number;
             let candidate = this.candidates[this.candidates.length -1];
             let surplus_votes = candidate.total_votes - this.quota;
             let weight = toFixedFive(surplus_votes /
@@ -219,64 +233,49 @@ class Ward {
                 this.get_candidate(c).votes[this.stage - 1] = toFixedFive(this.get_candidate(c).votes[this.stage - 1]);
             }
 
-            /*let data = this.candidates.map(((c) => ({
-                "number": c.number,
-                "name": c.name,
-                "party": c.party,
-                "percentage": Math.floor((c.preference[this.stage -1]/this.valid_votes) * 1000) / 10,
-                "value": c.preference[this.stage - 1]})));
-
-            this.canvas.bars[this.stage - 2] = svg.selectAll(".bar")
-                .data(data, (d) => d.number)
-                .join()
-                .transition()
+            // Initialize transition for use in general update pattern
+            const t = svg.transition()
                 .duration(700)
-                .ease(d3.easeExpOut)
-                .attr("width", (d) => this.canvas.x(d.value));
+                .ease(d3.easeExpOut);
 
-            let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2);
+            const data = this.get_data();
 
-            // x preference round
-            for(let i = 1; i < stage_data.length; i++) {
-                let c = stage_data[i][this.stage] - 1;
-                this.candidates[c].preference[this.stage - 1] += +(this.data[i][0] * weight).toFixed(5);
-            }
+            let enter = this.canvas.bars
+                .selectAll("g")
+                .data(data, function(d) {
+                    console.log(d);
+                    return d.number
+                })
+                .join("g")
+                .attr("id", (d) => "candidate-" + d.number);
 
-            data = this.candidates.filter((c) => c.number !== candidate.number).map(((c) => ({ "name": c.name,
-                "party": candidate.party, // c.party,
-                "percentage": Math.floor((c.preference[this.stage -1]/this.valid_votes) * 1000) / 10,
-                "value": c.preference[this.stage - 1] - c.preference[this.stage - 2],
-                "prev_value": c.preference[this.stage - 2],
-            })));
+            enter.selectAll("rect")
+                .data(d => d.stages, function(d, i) {
+                    //console.log(d.candidate + "_" + i);
+                    console.log(d, i);
+                    return d.candidate + "_" + i;
+                })
+                .join(enter =>
+                    enter
+                        .append("rect")
+                        .attr("class", "bar")
+                        .style("opacity", .9)
+                        .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
+                        .attr("height", this.canvas.y.bandwidth())
+                        .attr("fill", (d) => getBackgroundColor(this.get_candidate(this.stage_candidate).party))
+                        .attr("x", (d) => this.canvas.x(d.cumulative_votes))
+                        .attr("width", (d) => this.canvas.x(d.votes)),
+                    update => update
+                        .attr("width", (d) => this.canvas.x(d.cumulative_votes)),
+                    exit => exit
+                        .remove())
 
-            this.canvas.bars[this.stage - 1] = svg.selectAll(".bar-" + this.stage)
-                .data(data)
-                .enter()
-                .append("g")
-
-            //append rects
-            this.canvas.bars[this.stage - 1].append("rect")
-                .attr("class", "bar-" + this.stage)
-                .attr("y", (d) => this.canvas.y(d.name) + 30 )
-                .attr("height", this.canvas.y.bandwidth())
-                .attr("fill", (d) => getBackgroundColor(d.party))
-                .attr("x", (d) => this.canvas.x(d.prev_value))
-                .attr("width", 0)
-                .transition()
-                .duration(700)
-                .ease(d3.easeExpOut)
-                .attr("width", (d) => this.canvas.x(d.value));
-
-            data = this.candidates.map(((c) => ({ "name": c.name,
-                "party": c.party,
-                "percentage": Math.floor((c.preference[0]/this.valid_votes) * 1000) / 10,
-                "value": c.preference[this.stage - 1]})))
-
-            let texts = svg.selectAll(".label")
+            // Is it okay to re-apply data?
+            svg.selectAll(".label")
                 .data(data)
                 .join()
-                .attr("x", (d) => this.canvas.x(d.value) + 3)
-                .text((d) => Math.floor(d.value) + " (" + d.percentage + "%)");*/
+                .attr("x", (d) => this.canvas.x(d.total_votes) + 3)
+                .text((d) => Math.floor(d.total_votes) + " (" + d.percentage + "%)");
 
             d3.select("#subheader")
                 .text("Transferring " + surplus_votes + " votes from " + candidate.name + ".");
@@ -331,6 +330,7 @@ class Ward {
 
     draw_canvas() {
         const data = this.get_data();
+        console.log(data);
 
         // Scale function for X axis
         this.canvas.x = d3.scaleLinear()
@@ -361,23 +361,29 @@ class Ward {
             .duration(700)
             .ease(d3.easeExpOut);
 
-        let enter =this.canvas.bars
-            .selectAll(".bar")
+        let enter = this.canvas.bars
+            .selectAll("g")
             .data(data, (d) => d.number)
             .join("g")
             .attr("id", (d) => "candidate-" + d.number);
 
-        enter.append("rect")
+        enter.selectAll("rect")
+            .data(d => d.stages, function(d, i) {
+                //console.log(d.candidate + "_" + i);
+                return d.candidate + "_" + i;
+            })
+            .join("rect")
             .attr("class", "bar")
-            .attr("y", (d) => this.canvas.y(d.name) + 30 )
+            .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
             .attr("height", this.canvas.y.bandwidth())
-            .attr("fill", (d) => getBackgroundColor(d.party))
+            .attr("fill", (d) => getBackgroundColor(this.get_candidate(d.candidate).party))
             .attr("x", 0)
             .attr("width", 0)
-            .call(enter => enter.transition(t).attr("width", (d) => this.canvas.x(d.total_votes)));
+            .call(enter => enter.transition(t).attr("width", (d) => this.canvas.x(this.get_candidate(d.candidate).total_votes)));
 
         enter.append("text")
             .attr("class", "label")
+            .attr("id", (d) => "label-" + d.number)
             //y position of the label is halfway down the bar
             .attr("y", (d) => this.canvas.y(d.name) + this.canvas.y.bandwidth() / 2 + 34)
             //x position is 3 pixels to the right of the bar
