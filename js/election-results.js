@@ -1,22 +1,22 @@
 
-let margin = {
+const margin = {
     top: 15,
     right: 100,
     bottom: 15,
     left: 150
 };
 
-let width = 960 - margin.left - margin.right,
+const width = 960 - margin.left - margin.right,
     height = 500 - margin.top - margin.bottom;
 
-let svg = d3.select("#container").append("svg")
+const svg = d3.select("#container").append("svg")
     .attr("width", width + margin.left + margin.right)
     .attr("height", height + margin.top + margin.bottom)
     .append("g")
     .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
 
-let parties = {
+const parties = {
         "Grn": { abbr: "Grn", color: "#00B140", name: "Scottish Green Party"},
     "SNP": { abbr: "SNP", color: "#FDF38E", name: "Scottish National Party"},
     "SLD": { abbr: "SLD", color: "#FAA61A", name: "Scottish Liberal Democrats"},
@@ -57,7 +57,7 @@ class Ward {
         this.rejected_votes = undefined;
         this.quota = undefined;
         this.data = undefined;
-        this.canvas = { "bars": [] };
+        this.canvas = { };
         this.stage = 1;
 
         this.load_file(filename);
@@ -117,14 +117,6 @@ class Ward {
             // Parsing the data makes it an array of array of ints
             this.data = d3.dsvFormat(" ").parseRows(voting_patterns.join("\n"), d3.autoType);
 
-            // Calculating number of valid votes
-            /*let valid_votes = this.data.slice(1).reduce(function(a, b) {
-                if(a instanceof Array)
-                    return a[0] + b[0]
-                else
-                    return a + b[0];
-            });*/
-
             // First preference round
             for(i = 1; i < this.data.length; i++) {
                 this.candidates[this.data[i][1] - 1].preference[0] += this.data[i][0];
@@ -152,11 +144,18 @@ class Ward {
 
     }
 
+    /*
+    This function draws the initial title, information section, y axis, bar chart and quota line.
+     */
+
     prepare_canvas() {
-        let data = this.candidates.map(((c) => ({ "name": c.name,
+        let data = this.candidates.map(((c) => ({
+            "number": c.number,
+            "name": c.name,
             "party": c.party,
-            "percentage": Math.floor((c.preference[0]/this.valid_votes) * 1000) / 10,
-            "value": c.preference[0]})))
+            "stages": [{ "percentage": Math.floor((c.preference[0]/this.valid_votes) * 1000) / 10,
+                "value": c.preference[0]}]
+        })))
 
         this.canvas.g = svg.append("g")
             .attr("transform", "translate(0,10)")
@@ -171,73 +170,7 @@ class Ward {
             .attr("transform", "translate(0,15)")
             .text("Seats: " + this.seats + " Electorate: " + this.electorate);
 
-        this.canvas.x = d3.scaleLinear()
-            .range([0, width])
-            .domain([0, d3.max(data, (d) => d.value)]);
-
-        // Subtracting 60 off height to accommodate info text above and below
-        this.canvas.y = d3.scaleBand()
-            .domain(data.map((d) => d.name))
-            .rangeRound([height - 60, 0])
-            .padding(.1);
-
-        //make y axis to show bar names
-        this.canvas.yAxis = d3.axisLeft()
-            .scale(this.canvas.y)
-            .tickSize(0);
-
-        this.canvas.gy = svg.append("g")
-            .attr("class", "y axis")
-            .attr("transform", "translate(0,30)")
-            .call(this.canvas.yAxis);
-
-        this.canvas.bars[0] = svg.selectAll(".bar")
-            .data(data)
-            .enter()
-            .append("g")
-
-        //append rects
-        this.canvas.bars[0].append("rect")
-            .attr("class", "bar")
-            .attr("y", (d) => this.canvas.y(d.name) + 30 )
-            .attr("height", this.canvas.y.bandwidth())
-            .attr("fill", (d) => getBackgroundColor(d.party))
-            .attr("x", 0)
-            .attr("width", 0)
-            .transition()
-            .duration(700)
-            .ease(d3.easeExpOut)
-            .attr("width", (d) => this.canvas.x(d.value));
-
-        //add a value label to the right of each bar
-        this.canvas.bars[0].append("text")
-            .attr("class", "label")
-            //y position of the label is halfway down the bar
-            .attr("y", (d) => this.canvas.y(d.name) + this.canvas.y.bandwidth() / 2 + 34)
-            //x position is 3 pixels to the right of the bar
-            .attr("x", (d) => this.canvas.x(d.value) + 3)
-            .text((d) => d.value + " (" + d.percentage + "%)");
-
-        this.canvas.quota = svg.append('g')
-            .attr("class", "quota")
-
-        this.canvas.quota.append("line")
-            .attr("x1", this.canvas.x(this.quota))
-            .attr("y1", 0)
-            .attr("x2", this.canvas.x(this.quota))
-            .attr("y2", height)
-            .attr("stroke-dasharray", 5,5);
-
-        this.canvas.quota.append("text")
-            .attr("x", this.canvas.x(this.quota) - 96)
-            .attr("y", height - 10)
-            .text("Quota: " + this.quota);
-
-        this.canvas.quota.style("opacity", 0)
-            .transition()
-            .duration(2000)
-            .ease(d3.easeLinear)
-            .style("opacity", 1);
+        this.draw_canvas(data);
 
     }
 
@@ -263,8 +196,6 @@ class Ward {
             let surplus_votes = total_votes - this.quota;
             let weight = surplus_votes / (total_votes - this.get_non_transferable_votes(candidate));
 
-            console.log(candidate, surplus_votes, +weight.toFixed(5));
-
             this.candidates.forEach((c) => c.preference[this.stage-1] = c.preference[this.stage-2])
 
             candidate.preference[this.stage - 1] = this.quota;
@@ -277,13 +208,15 @@ class Ward {
                 this.candidates[c].preference[this.stage - 1] += this.data[i][0] * weight;
             }*/
 
-            let data = this.candidates.map(((c) => ({ "name": c.name,
+            let data = this.candidates.map(((c) => ({
+                "number": c.number,
+                "name": c.name,
                 "party": c.party,
                 "percentage": Math.floor((c.preference[this.stage -1]/this.valid_votes) * 1000) / 10,
                 "value": c.preference[this.stage - 1]})));
 
             this.canvas.bars[this.stage - 2] = svg.selectAll(".bar")
-                .data(data)
+                .data(data, (d) => d.number)
                 .join()
                 .transition()
                 .duration(700)
@@ -360,10 +293,90 @@ class Ward {
         }
 
     }
+
+    draw_quota() {
+        this.canvas.quota = svg.append('g')
+            .attr("class", "quota")
+
+        this.canvas.quota.append("line")
+            .attr("x1", this.canvas.x(this.quota))
+            .attr("y1", 0)
+            .attr("x2", this.canvas.x(this.quota))
+            .attr("y2", height)
+            .attr("stroke-dasharray", 5,5);
+
+        this.canvas.quota.append("text")
+            .attr("x", this.canvas.x(this.quota) - 96)
+            .attr("y", height - 10)
+            .text("Quota: " + this.quota);
+
+        this.canvas.quota.style("opacity", 0)
+            .transition()
+            .duration(2000)
+            .ease(d3.easeLinear)
+            .style("opacity", 1);
+
+    }
+
+    draw_canvas(data) {
+        // Scale function for X axis
+        this.canvas.x = d3.scaleLinear()
+            .range([0, width])
+            .domain([0, d3.max(data, (d) => d.stages[0].value)]);
+
+        // Scale function for Y axis
+        // Subtracting 60 off height to accommodate info text above and below
+        this.canvas.y = d3.scaleBand()
+            .domain(data.map((d) => d.name))
+            .rangeRound([height - 60, 0])
+            .padding(.1);
+
+        // Function to create Y axis legend
+        // make Y axis to show bar names
+        this.canvas.yAxis = d3.axisLeft()
+            .scale(this.canvas.y)
+            .tickSize(0);
+
+        this.canvas.gy = svg.append("g")
+            .attr("class", "y axis")
+            .attr("transform", "translate(0,30)")
+            .call(this.canvas.yAxis);
+
+        this.canvas.bars = svg.append("g").attr("id", "bars");
+
+        const t = svg.transition()
+            .duration(700)
+            .ease(d3.easeExpOut);
+
+        let enter =this.canvas.bars
+            .selectAll(".bar")
+            .data(data, (d) => d.number)
+            .join("g")
+            .attr("id", (d) => "candidate-" + d.number);
+
+        enter.append("rect")
+            .attr("class", "bar")
+            .attr("y", (d) => this.canvas.y(d.name) + 30 )
+            .attr("height", this.canvas.y.bandwidth())
+            .attr("fill", (d) => getBackgroundColor(d.party))
+            .attr("x", 0)
+            .attr("width", 0)
+            .call(enter => enter.transition(t).attr("width", (d) => this.canvas.x(d.stages[0].value)));
+
+        enter.append("text")
+            .attr("class", "label")
+            //y position of the label is halfway down the bar
+            .attr("y", (d) => this.canvas.y(d.name) + this.canvas.y.bandwidth() / 2 + 34)
+            //x position is 3 pixels to the right of the bar
+            .attr("x", (d) => this.canvas.x(d.stages[0].value) + 3)
+            .text((d) => d.stages[0].value + " (" + d.stages[0].percentage + "%)");
+
+        this.draw_quota();
+    }
 }
 
 
-ward = new Ward("Torry-Ferryhill.dat")
-//ward = new Ward("Southside-Newington.dat")
+//ward = new Ward("Torry-Ferryhill.dat")
+ward = new Ward("Southside-Newington.dat")
 console.log(ward);
 
