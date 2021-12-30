@@ -32,14 +32,22 @@ function getBackgroundColor(party) {
         return "gray"
 }
 
+function toFixedFive(number) {
+    return +number.toFixed(5);
+}
+
 class Candidate {
     constructor(number, name, party, successful) {
         this.number = number;
         this.name = name;
         this.party = party;
         this.successful = successful;
-        this.preference = [0];
+        this.votes = [0];
 
+    }
+
+    get total_votes() {
+        return this.votes.reduce((a, b) => a + b)
     }
 }
 
@@ -63,6 +71,21 @@ class Ward {
         this.load_file(filename);
 
         //this.draw_first_stage();
+    }
+
+    is_next_stage_needed() {
+        return this.candidates.filter((c) => c.total_votes >= this.quota).length !== this.seats
+    }
+
+    get_data() {
+        return this.candidates.map(((c) => ({
+            "number": c.number,
+            "name": c.name,
+            "party": c.party,
+            "total_votes": c.total_votes,
+            "percentage": Math.floor((c.total_votes/this.valid_votes) * 1000) / 10,
+            "stages": c.votes
+        })))
     }
 
     get_candidate(number) {
@@ -119,16 +142,12 @@ class Ward {
 
             // First preference round
             for(i = 1; i < this.data.length; i++) {
-                this.candidates[this.data[i][1] - 1].preference[0] += this.data[i][0];
+                this.candidates[this.data[i][1] - 1].votes[0] += this.data[i][0];
             }
-
-            let successful_candidates = []
-            // Check who's elected after first preference
-            this.candidates.forEach((c) => (c.preference[0] >= this.quota) ? successful_candidates.push(c.number): void(0))
 
             this.prepare_canvas();
 
-            if(successful_candidates.length < this.seats)   {
+            if(this.is_next_stage_needed())   {
                 this.stage = 2;
                 d3.select("#button").text("Stage 2");
                 d3.select("#button").on("click", () => this.next_stage())
@@ -137,8 +156,6 @@ class Ward {
             else {
                 d3.select("#info").text("All " + this.seats + " seats filled in first stage.");
             }
-
-
 
         });
 
@@ -149,14 +166,6 @@ class Ward {
      */
 
     prepare_canvas() {
-        let data = this.candidates.map(((c) => ({
-            "number": c.number,
-            "name": c.name,
-            "party": c.party,
-            "stages": [{ "percentage": Math.floor((c.preference[0]/this.valid_votes) * 1000) / 10,
-                "value": c.preference[0]}]
-        })))
-
         this.canvas.g = svg.append("g")
             .attr("transform", "translate(0,10)")
             .attr("class", "header");
@@ -170,7 +179,7 @@ class Ward {
             .attr("transform", "translate(0,15)")
             .text("Seats: " + this.seats + " Electorate: " + this.electorate);
 
-        this.draw_canvas(data);
+        this.draw_canvas();
 
     }
 
@@ -185,30 +194,32 @@ class Ward {
     next_stage() {
         d3.select("#header").text(this.name + ", stage: " + this.stage);
 
-        // Array of number and value for each candidate sorted in ascending order by value
+        // Candidates sorted in ascending order by total votes
         // last element is candidate with most votes, first element with fewest
-        let sorted_candidates = this.candidates.map((c) => ({ "number": c.number, "value": c.preference[this.stage-2]}))
-            .sort((a, b) => a.value - b.value);
+        this.candidates.sort((a, b) => a.total_votes - b.total_votes);
 
-        if(sorted_candidates[sorted_candidates.length -1].value > this.quota) {
-            let candidate = this.get_candidate(sorted_candidates[sorted_candidates.length -1].number);
-            let total_votes = candidate.preference[this.stage - 2];
-            let surplus_votes = total_votes - this.quota;
-            let weight = surplus_votes / (total_votes - this.get_non_transferable_votes(candidate));
+        if(this.candidates[this.candidates.length -1].total_votes > this.quota) {
+            let candidate = this.candidates[this.candidates.length -1];
+            let surplus_votes = candidate.total_votes - this.quota;
+            let weight = toFixedFive(surplus_votes /
+                (candidate.total_votes - this.get_non_transferable_votes(candidate)));
 
-            this.candidates.forEach((c) => c.preference[this.stage-1] = c.preference[this.stage-2])
+            // Giving all candidates placeholder values for new stage
+            this.candidates.forEach((c) => c.votes[this.stage-1] = 0)
 
-            candidate.preference[this.stage - 1] = this.quota;
-
-            /*let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2)
+            candidate.votes[this.stage - 1] = -surplus_votes;
+            let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2)
 
             // x preference round
             for(let i = 1; i < stage_data.length; i++) {
-                let c = stage_data[i][this.stage] - 1;
-                this.candidates[c].preference[this.stage - 1] += this.data[i][0] * weight;
-            }*/
+                let c = stage_data[i][this.stage];
 
-            let data = this.candidates.map(((c) => ({
+                this.get_candidate(c).votes[this.stage - 1] += toFixedFive(this.data[i][0] * weight);
+                // Bloody javascript
+                this.get_candidate(c).votes[this.stage - 1] = toFixedFive(this.get_candidate(c).votes[this.stage - 1]);
+            }
+
+            /*let data = this.candidates.map(((c) => ({
                 "number": c.number,
                 "name": c.name,
                 "party": c.party,
@@ -265,7 +276,7 @@ class Ward {
                 .data(data)
                 .join()
                 .attr("x", (d) => this.canvas.x(d.value) + 3)
-                .text((d) => Math.floor(d.value) + " (" + d.percentage + "%)");
+                .text((d) => Math.floor(d.value) + " (" + d.percentage + "%)");*/
 
             d3.select("#subheader")
                 .text("Transferring " + surplus_votes + " votes from " + candidate.name + ".");
@@ -281,7 +292,7 @@ class Ward {
 
         let successful_candidates = []
         // Check who's elected after first preference
-        this.candidates.forEach((c) => (c.preference[0] >= this.quota) ? successful_candidates.push(c.number): void(0))
+        this.candidates.forEach((c) => (c.votes[0] >= this.quota) ? successful_candidates.push(c.number): void(0))
 
         if(successful_candidates.length < this.seats)   {
             this.stage += 1;
@@ -318,11 +329,13 @@ class Ward {
 
     }
 
-    draw_canvas(data) {
+    draw_canvas() {
+        const data = this.get_data();
+
         // Scale function for X axis
         this.canvas.x = d3.scaleLinear()
             .range([0, width])
-            .domain([0, d3.max(data, (d) => d.stages[0].value)]);
+            .domain([0, d3.max(data, (d) => d.total_votes)]);
 
         // Scale function for Y axis
         // Subtracting 60 off height to accommodate info text above and below
@@ -361,22 +374,22 @@ class Ward {
             .attr("fill", (d) => getBackgroundColor(d.party))
             .attr("x", 0)
             .attr("width", 0)
-            .call(enter => enter.transition(t).attr("width", (d) => this.canvas.x(d.stages[0].value)));
+            .call(enter => enter.transition(t).attr("width", (d) => this.canvas.x(d.total_votes)));
 
         enter.append("text")
             .attr("class", "label")
             //y position of the label is halfway down the bar
             .attr("y", (d) => this.canvas.y(d.name) + this.canvas.y.bandwidth() / 2 + 34)
             //x position is 3 pixels to the right of the bar
-            .attr("x", (d) => this.canvas.x(d.stages[0].value) + 3)
-            .text((d) => d.stages[0].value + " (" + d.stages[0].percentage + "%)");
+            .attr("x", (d) => this.canvas.x(d.total_votes) + 3)
+            .text((d) => d.total_votes + " (" + d.percentage + "%)");
 
         this.draw_quota();
     }
 }
 
 
-//ward = new Ward("Torry-Ferryhill.dat")
-ward = new Ward("Southside-Newington.dat")
+ward = new Ward("Torry-Ferryhill.dat")
+//ward = new Ward("Southside-Newington.dat")
 console.log(ward);
 
