@@ -41,8 +41,10 @@ class Candidate {
         this.number = number;
         this.name = name;
         this.party = party;
-        this.successful = successful;
-        this.votes = [0];
+        this.successful = successful; // Not computed but passed from inputted data
+        this.votes = [0]; // Votes that get added to with each stage
+        this.preference = 1; // Which preference of candidate's voters is being counted
+        // This only comes into consideration if this candidate has been eliminated
 
     }
 
@@ -71,7 +73,6 @@ class Ward {
 
         this.load_file(filename);
 
-        //this.draw_first_stage();
     }
 
     is_next_stage_needed() {
@@ -113,6 +114,10 @@ class Ward {
             .reduce((previousValue, currentValue) => previousValue + currentValue[0], 0);
 
     }
+
+    /*
+        Function that loads the data file containing voting preferences.
+     */
 
     load_file(filename) {
         d3.text(filename).then(data => {
@@ -175,7 +180,7 @@ class Ward {
     }
 
     /*
-    This function draws the initial title, information section, y axis, bar chart and quota line.
+        Function that draws the initial title, information section, y axis, bar chart and quota line.
      */
 
     prepare_canvas() {
@@ -197,11 +202,9 @@ class Ward {
     }
 
     /*
-
-    The possibilities for the next stage(s) are two:
-    - that there is a surplus, which is then used or barring that,
-    - the candidate with the fewest votes is eliminated and his votes split amongst the hopefuls
-
+        The possibilities for the next stage(s) are two:
+        - that there is a surplus, which is then used or barring that,
+        - the candidate with the fewest votes is eliminated and his votes split amongst the hopefuls
      */
 
     next_stage() {
@@ -283,7 +286,7 @@ class Ward {
 
         }
         else {
-            let eliminated_candidate = this.get_candidate(sorted_candidates[0].number);
+            let eliminated_candidate = this.get_candidate(this.candidates[0].number);
 
             d3.select("#subheader")
                 .text("Transferring " + eliminated_candidate.number + " votes from eliminated candidate " + eliminated_candidate.name + ".");
@@ -303,6 +306,10 @@ class Ward {
         }
 
     }
+
+    /*
+        Function that draws the dotted quota line
+     */
 
     draw_quota() {
         this.canvas.quota = svg.append('g')
@@ -327,6 +334,10 @@ class Ward {
             .style("opacity", 1);
 
     }
+
+    /*
+        Function that initialises the canvas (svg)
+     */
 
     draw_canvas() {
         const data = this.get_data();
