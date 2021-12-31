@@ -36,6 +36,15 @@ function toFixedFive(number) {
     return +number.toFixed(5);
 }
 
+function removeElement(array, element) {
+    const index = array.indexOf(element);
+    if (index > -1) {
+        array.splice(index, 1);
+    }
+
+    return array
+}
+
 class Candidate {
     constructor(number, name, party, successful) {
         this.number = number;
@@ -45,6 +54,7 @@ class Candidate {
         this.votes = [0]; // Votes that get added to with each stage
         this.preference = 1; // Which preference of candidate's voters is being counted
         // This only comes into consideration if this candidate has been eliminated
+        this.eliminated = false;
 
     }
 
@@ -80,8 +90,10 @@ class Ward {
     }
 
     get_data() {
-        let candidates = JSON.parse(JSON.stringify(this.candidates))
+        let candidates = JSON.parse(JSON.stringify(this.candidates.filter((c) => !c.eliminated)));
 
+        // This loop iterates over each candidate's votes and appends negative values
+        // to the earlier value and removes the negative element
         candidates.forEach(function(c) {
             for (let i = 0; i < c.votes.length; i++) {
                 if (c.votes[i] < 0) {
@@ -92,14 +104,18 @@ class Ward {
             }
         });
 
-        return candidates.map(((c) => ({
+        let cs = candidates.map(((c) => ({
             "number": c.number,
             "name": c.name,
             "party": c.party,
             "total_votes": c.votes.reduce((a, b) => a + b),
             "percentage": Math.floor((c.votes.reduce((a, b) => a + b)/this.valid_votes) * 1000) / 10,
             "stages": c.votes.map((v, i, a) => ({"cumulative_votes": (i) ? a.slice(0, i).reduce((w,y) => w + y) : v, "votes": v, "candidate": c.number}))
-        })))
+        })));
+
+        cs.sort((a, b) => a.total_votes - b.total_votes);
+
+        return cs
     }
 
     get_candidate(number) {
@@ -193,9 +209,15 @@ class Ward {
             .text(this.name + ", stage: " + this.stage);
 
         this.canvas.g.append("text")
-            .attr("id", "subheader")
+            .attr("class", "general_info")
             .attr("transform", "translate(0,15)")
-            .text("Seats: " + this.seats + " Electorate: " + this.electorate);
+            .text("Seats: " + this.seats +
+                " | Electorate: " + this.electorate +
+                " | Turnout: " + Math.floor((this.votes_cast / this.electorate) * 1000) / 10 + "%");
+
+        this.canvas.g.append("text")
+            .attr("id", "subheader")
+            .attr("transform", "translate(0,30)")
 
         this.draw_canvas();
 
@@ -212,11 +234,18 @@ class Ward {
 
         // Candidates sorted in ascending order by total votes
         // last element is candidate with most votes, first element with fewest
-        this.candidates.sort((a, b) => a.total_votes - b.total_votes);
+        //this.candidates.sort((a, b) => a.total_votes - b.total_votes);
 
-        if(this.candidates[this.candidates.length -1].total_votes > this.quota) {
-            this.stage_candidate = this.candidates[this.candidates.length -1].number;
-            let candidate = this.candidates[this.candidates.length -1];
+        // Initialize transition for use in general update pattern
+        const t = svg.transition()
+            .duration(700)
+            .ease(d3.easeExpOut);
+
+        let cs = this.candidates.filter((c) => !c.eliminated);
+
+        if(cs[cs.length -1].total_votes > this.quota) {
+            let candidate = cs[cs.length - 1];
+            this.stage_candidate = candidate.number;
             let surplus_votes = candidate.total_votes - this.quota;
             let weight = toFixedFive(surplus_votes /
                 (candidate.total_votes - this.get_non_transferable_votes(candidate)));
@@ -225,28 +254,46 @@ class Ward {
             this.candidates.forEach((c) => c.votes[this.stage-1] = 0)
 
             candidate.votes[this.stage - 1] = -surplus_votes;
-            let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2)
 
+            // Only data where that candidate was first preference and there were more than the single preference
+            let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2);
+            //console.log(stage_data);
+            stage_data.forEach((s) => this.candidates.filter((c) => c.eliminated).forEach((e) => removeElement(s, e.number)));
+            //console.log(stage_data);
             // x preference round
-            for(let i = 1; i < stage_data.length; i++) {
-                let c = stage_data[i][this.stage];
+            for(let i = 0; i < stage_data.length; i++) {
+                // Array element 3. will give second preference
+                let c = stage_data[i][2];
 
-                this.get_candidate(c).votes[this.stage - 1] += toFixedFive(this.data[i][0] * weight);
+                this.get_candidate(c).votes[this.stage - 1] += toFixedFive(stage_data[i][0] * weight);
                 // Bloody javascript
                 this.get_candidate(c).votes[this.stage - 1] = toFixedFive(this.get_candidate(c).votes[this.stage - 1]);
             }
 
-            // Initialize transition for use in general update pattern
-            const t = svg.transition()
-                .duration(700)
-                .ease(d3.easeExpOut);
+            //this.candidates.sort((a, b) => a.total_votes - b.total_votes);
 
             const data = this.get_data();
+
+            this.canvas.y = d3.scaleBand()
+                .domain(data.map((d) => d.name))
+                .rangeRound([height - 80, 0])
+                .padding(.1);
+
+            // Function to create Y axis legend
+            // make Y axis to show bar names
+            this.canvas.yAxis = d3.axisLeft()
+                .scale(this.canvas.y)
+                .tickSize(0);
+
+            this.canvas.gy.transition(t).call(this.canvas.yAxis);
+
+            //data.sort((a, b) => a.total_votes - b.total_votes);
+            console.log(data);
 
             let enter = this.canvas.bars
                 .selectAll("g")
                 .data(data, function(d) {
-                    console.log(d);
+                    //console.log(d);
                     return d.number
                 })
                 .join("g")
@@ -255,20 +302,24 @@ class Ward {
             enter.selectAll("rect")
                 .data(d => d.stages, function(d, i) {
                     //console.log(d.candidate + "_" + i);
-                    console.log(d, i);
+                    //console.log(d, i);
                     return d.candidate + "_" + i;
                 })
                 .join(enter =>
                     enter
                         .append("rect")
-                        .attr("class", "bar")
+                        .attr("class", "bar new")
                         .style("opacity", .9)
                         .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
                         .attr("height", this.canvas.y.bandwidth())
                         .attr("fill", (d) => getBackgroundColor(this.get_candidate(this.stage_candidate).party))
                         .attr("x", (d) => this.canvas.x(d.cumulative_votes))
-                        .attr("width", (d) => this.canvas.x(d.votes)),
+                        .attr("width", 0)
+                        .call((enter) => enter.transition(t).attr("width", (d) => this.canvas.x(d.votes)))
+                        .append("title")
+                        .text((d) => Math.floor(d.votes) + " votes from " + this.get_candidate(this.stage_candidate).name),
                     update => update
+                        .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
                         .attr("width", (d) => this.canvas.x(d.cumulative_votes)),
                     exit => exit
                         .remove())
@@ -281,22 +332,100 @@ class Ward {
                 .text((d) => Math.floor(d.total_votes) + " (" + d.percentage + "%)");
 
             d3.select("#subheader")
-                .text("Transferring " + surplus_votes + " votes from " + candidate.name + ".");
+                .text("Transferring " + surplus_votes + " surplus votes from " + candidate.name + ".");
 
 
         }
         else {
-            let eliminated_candidate = this.get_candidate(this.candidates[0].number);
+            let eliminated_candidate = this.get_candidate(cs[0].number);
+            eliminated_candidate.eliminated = true;
+            this.stage_candidate = eliminated_candidate.number;
+
+            let eliminated_votes = eliminated_candidate.total_votes;
+            //let weight = toFixedFive(eliminated_votes /
+            //    (eliminated_votes - this.get_non_transferable_votes(eliminated_candidate)));
+
+            let stage_data = this.data.filter((v) => v[1] === eliminated_candidate.number && v.length > 2);
+            console.log(stage_data);
+
+            // Giving all candidates placeholder values for new stage
+            this.candidates.forEach((c) => c.votes[this.stage-1] = 0)
+
+            // x preference round,
+            // data is formatted so
+            // [1, 10, 8, 4, 5, 6, 2, 9, 1, 3, 7], where
+            //
+            for(let i = 0; i < stage_data.length; i++) {
+                let c = stage_data[i][stage_data[i].findIndex((c) => !this.get_candidate(c).eliminated)]; //[2];
+                //console.log(stage_data[i][0]);
+                this.get_candidate(c).votes[this.stage - 1] += stage_data[i][0];
+                // Bloody javascript
+                //this.get_candidate(c).votes[this.stage - 1] = toFixedFive(this.get_candidate(c).votes[this.stage - 1]);
+            }
+            //console.log(stage_data);
+
+            stage_data.forEach((s) => this.candidates.filter((c) => c.eliminated).forEach((e) => removeElement(s, e.number)));
+
+            //console.log(stage_data);
+            const data = this.get_data();
+
+            this.canvas.y = d3.scaleBand()
+                .domain(data.map((d) => d.name))
+                .rangeRound([height - 80, 0])
+                .padding(.1);
+
+            // Function to create Y axis legend
+            // make Y axis to show bar names
+            this.canvas.yAxis = d3.axisLeft()
+                .scale(this.canvas.y)
+                .tickSize(0);
+
+            this.canvas.gy.transition(t).call(this.canvas.yAxis);
+
+            let enter = this.canvas.bars
+                .selectAll("g")
+                .data(data, function(d) {
+                    //console.log(d);
+                    return d.number
+                })
+                .join("g")
+                .attr("id", (d) => "candidate-" + d.number);
+
+            enter.selectAll("rect")
+                .data(d => d.stages, function(d, i) {
+                    //console.log(d.candidate + "_" + i);
+                    //console.log(d, i);
+                    return d.candidate + "_" + i;
+                })
+                .join(enter =>
+                        enter
+                            .append("rect")
+                            .attr("class", "bar")
+                            .style("opacity", .9)
+                            .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
+                            .attr("height", this.canvas.y.bandwidth())
+                            .attr("fill", (d) => getBackgroundColor(this.get_candidate(this.stage_candidate).party))
+                            .attr("x", (d) => this.canvas.x(d.cumulative_votes))
+                            .attr("width", (d) => this.canvas.x(d.votes)),
+                    update => update
+                        .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
+                        .attr("height", this.canvas.y.bandwidth())
+                        .attr("width", (d) => this.canvas.x(d.votes)),
+                    exit => exit
+                        .remove())
+
+            // Is it okay to re-apply data?
+            svg.selectAll(".label")
+                .data(data)
+                .join()
+                .attr("x", (d) => this.canvas.x(d.total_votes) + 3)
+                .text((d) => Math.floor(d.total_votes) + " (" + d.percentage + "%)");
 
             d3.select("#subheader")
                 .text("Transferring " + eliminated_candidate.number + " votes from eliminated candidate " + eliminated_candidate.name + ".");
         }
 
-        let successful_candidates = []
-        // Check who's elected after first preference
-        this.candidates.forEach((c) => (c.votes[0] >= this.quota) ? successful_candidates.push(c.number): void(0))
-
-        if(successful_candidates.length < this.seats)   {
+        if(this.is_next_stage_needed())   {
             this.stage += 1;
             d3.select("#button").text("Stage " + this.stage);
         }
@@ -323,9 +452,9 @@ class Ward {
             .attr("stroke-dasharray", 5,5);
 
         this.canvas.quota.append("text")
-            .attr("x", this.canvas.x(this.quota) - 96)
+            .attr("x", this.canvas.x(this.quota) - 146)
             .attr("y", height - 10)
-            .text("Quota: " + this.quota);
+            .text("Quota: " + this.quota + " (" + Math.floor((this.quota/this.valid_votes) * 1000) / 10 + "%)");
 
         this.canvas.quota.style("opacity", 0)
             .transition()
@@ -340,8 +469,13 @@ class Ward {
      */
 
     draw_canvas() {
+        // Candidates sorted in ascending order by total votes
+        // last element is candidate with most votes, first element with fewest
+        this.candidates.sort((a, b) => a.total_votes - b.total_votes);
+
         const data = this.get_data();
-        console.log(data);
+        //console.log(data.sort((a, b) => b.total_votes - a.total_votes));
+
 
         // Scale function for X axis
         this.canvas.x = d3.scaleLinear()
@@ -352,7 +486,7 @@ class Ward {
         // Subtracting 60 off height to accommodate info text above and below
         this.canvas.y = d3.scaleBand()
             .domain(data.map((d) => d.name))
-            .rangeRound([height - 60, 0])
+            .rangeRound([height - 80, 0])
             .padding(.1);
 
         // Function to create Y axis legend
@@ -363,10 +497,10 @@ class Ward {
 
         this.canvas.gy = svg.append("g")
             .attr("class", "y axis")
-            .attr("transform", "translate(0,30)")
+            .attr("transform", "translate(0, 40)")
             .call(this.canvas.yAxis);
 
-        this.canvas.bars = svg.append("g").attr("id", "bars");
+        this.canvas.bars = svg.append("g").attr("id", "bars").attr("transform", "translate(0, 10)");
 
         const t = svg.transition()
             .duration(700)
@@ -405,8 +539,8 @@ class Ward {
     }
 }
 
-
-ward = new Ward("Torry-Ferryhill.dat")
+ward = new Ward("Hazlehead-Queens_Cross-Countesswells.dat")
+//ward = new Ward("Torry-Ferryhill.dat")
 //ward = new Ward("Southside-Newington.dat")
 console.log(ward);
 

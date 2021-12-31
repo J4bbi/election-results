@@ -50,6 +50,15 @@ button {
     font-weight: bold;
 }
 
+.general_info {
+    font-size: 10px;
+}
+
 #subheader {
     font-size: 10px;
+}
+
+.new {
+    stroke-width: 1;
+    stroke: #fff;
 }
