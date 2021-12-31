@@ -146,6 +146,16 @@ class Ward {
         this.canvas.gy.transition(this.canvas.transition).call(this.canvas.yAxis);
     }
 
+    set_labels(data) {
+        // Is it okay to re-apply data?
+        svg.selectAll(".label")
+            .data(data)
+            .join()
+            .attr("x", (d) => this.canvas.x(d.total_votes) + 3)
+            .attr("y", (d) => this.canvas.y(d.name) + this.canvas.y.bandwidth() / 2 + 34)
+            .text((d) => Math.floor(d.total_votes) + " (" + d.percentage + "%)");
+    }
+
     /*
         Function that loads the data file containing voting preferences.
     */
@@ -282,7 +292,6 @@ class Ward {
         this.candidates.sort((a, b) => a.total_votes - b.total_votes);
 
         const data = this.get_data();
-        //console.log(data.sort((a, b) => b.total_votes - a.total_votes));
 
         // Scale function for X axis
         this.canvas.x = d3.scaleLinear()
@@ -300,10 +309,7 @@ class Ward {
             .attr("id", (d) => "candidate-" + d.number);
 
         enter.selectAll("rect")
-            .data(d => d.stages, function(d, i) {
-                //console.log(d.candidate + "_" + i);
-                return d.candidate + "_" + i;
-            })
+            .data(d => d.stages, (d, i) => d.candidate + "_" + i)
             .join("rect")
             .attr("class", "bar")
             .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
@@ -311,7 +317,11 @@ class Ward {
             .attr("fill", (d) => getBackgroundColor(this.get_candidate(d.candidate).party))
             .attr("x", 0)
             .attr("width", 0)
-            .call(enter => enter.transition(this.canvas.transition).attr("width", (d) => this.canvas.x(this.get_candidate(d.candidate).total_votes)));
+            .call(enter => enter
+                .transition(this.canvas.transition)
+                .attr("width", (d) => this.canvas.x(this.get_candidate(d.candidate).total_votes)))
+            .append("title")
+            .text((d) => this.get_candidate(d.candidate).total_votes + " first preference votes");
 
         enter.append("text")
             .attr("class", "label")
@@ -339,6 +349,7 @@ class Ward {
         //this.candidates.sort((a, b) => a.total_votes - b.total_votes);
 
         let cs = this.candidates.filter((c) => !c.eliminated);
+        console.log(cs);
 
         if(cs[cs.length -1].total_votes > this.quota) {
             this.transfer_votes(cs[cs.length - 1]);
@@ -373,9 +384,9 @@ class Ward {
 
         // Only data where that candidate was first preference and there were more than the single preference
         let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2);
-        //console.log(stage_data);
+
         stage_data.forEach((s) => this.candidates.filter((c) => c.eliminated).forEach((e) => removeElement(s, e.number)));
-        //console.log(stage_data);
+
         // x preference round
         for(let i = 0; i < stage_data.length; i++) {
             // Array element 3. will give second preference
@@ -386,30 +397,18 @@ class Ward {
             this.get_candidate(c).votes[this.stage - 1] = toFixedFive(this.get_candidate(c).votes[this.stage - 1]);
         }
 
-        //this.candidates.sort((a, b) => a.total_votes - b.total_votes);
-
         const data = this.get_data();
 
         this.set_y_axis(data);
 
-        //data.sort((a, b) => a.total_votes - b.total_votes);
-        console.log(data);
-
         let enter = this.canvas.bars
             .selectAll("g")
-            .data(data, function(d) {
-                //console.log(d);
-                return d.number
-            })
+            .data(data, (d) => d.number)
             .join("g")
             .attr("id", (d) => "candidate-" + d.number);
 
         enter.selectAll("rect")
-            .data(d => d.stages, function(d, i) {
-                //console.log(d.candidate + "_" + i);
-                //console.log(d, i);
-                return d.candidate + "_" + i;
-            })
+            .data(d => d.stages, (d, i) => d.candidate + "_" + i)
             .join(enter =>
                     enter
                         .append("rect")
@@ -431,12 +430,7 @@ class Ward {
                 exit => exit
                     .remove())
 
-        // Is it okay to re-apply data?
-        svg.selectAll(".label")
-            .data(data)
-            .join()
-            .attr("x", (d) => this.canvas.x(d.total_votes) + 3)
-            .text((d) => Math.floor(d.total_votes) + " (" + d.percentage + "%)");
+        this.set_labels(data);
 
         d3.select("#subheader")
             .text("Transferring " + surplus_votes + " surplus votes from " + candidate.name + ".");
@@ -447,12 +441,7 @@ class Ward {
         eliminated_candidate.eliminated = true;
         this.stage_candidate = eliminated_candidate.number;
 
-        let eliminated_votes = eliminated_candidate.total_votes;
-        //let weight = toFixedFive(eliminated_votes /
-        //    (eliminated_votes - this.get_non_transferable_votes(eliminated_candidate)));
-
         let stage_data = this.data.filter((v) => v[1] === eliminated_candidate.number && v.length > 2);
-        console.log(stage_data);
 
         // Giving all candidates placeholder values for new stage
         this.candidates.forEach((c) => c.votes[this.stage-1] = 0)
@@ -462,36 +451,27 @@ class Ward {
         // [1, 10, 8, 4, 5, 6, 2, 9, 1, 3, 7], where
         //
         for(let i = 0; i < stage_data.length; i++) {
-            let c = stage_data[i][stage_data[i].findIndex((c) => !this.get_candidate(c).eliminated)]; //[2];
-            //console.log(stage_data[i][0]);
+            const first_valid_preference = stage_data[i].slice(1).findIndex((c) => !this.get_candidate(c).eliminated);
+            let c = stage_data[i][first_valid_preference]; //[2];
+
             this.get_candidate(c).votes[this.stage - 1] += stage_data[i][0];
-            // Bloody javascript
-            //this.get_candidate(c).votes[this.stage - 1] = toFixedFive(this.get_candidate(c).votes[this.stage - 1]);
+
         }
-        //console.log(stage_data);
 
         stage_data.forEach((s) => this.candidates.filter((c) => c.eliminated).forEach((e) => removeElement(s, e.number)));
 
-        //console.log(stage_data);
         const data = this.get_data();
 
         this.set_y_axis(data);
 
         let enter = this.canvas.bars
             .selectAll("g")
-            .data(data, function(d) {
-                //console.log(d);
-                return d.number
-            })
+            .data(data, (d) => d.number)
             .join("g")
             .attr("id", (d) => "candidate-" + d.number);
 
         enter.selectAll("rect")
-            .data(d => d.stages, function(d, i) {
-                //console.log(d.candidate + "_" + i);
-                //console.log(d, i);
-                return d.candidate + "_" + i;
-            })
+            .data(d => d.stages, (d, i) => d.candidate + "_" + i)
             .join(enter =>
                     enter
                         .append("rect")
@@ -509,12 +489,7 @@ class Ward {
                 exit => exit
                     .remove())
 
-        // Is it okay to re-apply data?
-        svg.selectAll(".label")
-            .data(data)
-            .join()
-            .attr("x", (d) => this.canvas.x(d.total_votes) + 3)
-            .text((d) => Math.floor(d.total_votes) + " (" + d.percentage + "%)");
+        this.set_labels(data);
 
         d3.select("#subheader")
             .text("Transferring " + eliminated_candidate.number + " votes from eliminated candidate " + eliminated_candidate.name + ".");
