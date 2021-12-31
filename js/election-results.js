@@ -94,15 +94,14 @@ class Ward {
 
         // This loop iterates over each candidate's votes and appends negative values
         // to the earlier value and removes the negative element
-        candidates.forEach(function(c) {
-            for (let i = 0; i < c.votes.length; i++) {
-                if (c.votes[i] < 0) {
-                    c.votes[i - 1] += c.votes[i];
-                    c.votes.splice(i, 1);
-                }
+        for(let i = 0; i < candidates.length; i++) {
+            const negative = candidates[i].votes.findIndex((v) => v < 0);
 
+            if(negative > 0) {
+                candidates[i].votes = [this.quota];
             }
-        });
+
+        }
 
         let cs = candidates.map(((c) => ({
             "number": c.number,
@@ -344,12 +343,8 @@ class Ward {
     next_stage() {
         d3.select("#header").text(this.name + ", stage: " + this.stage);
 
-        // Candidates sorted in ascending order by total votes
-        // last element is candidate with most votes, first element with fewest
-        //this.candidates.sort((a, b) => a.total_votes - b.total_votes);
-
         let cs = this.candidates.filter((c) => !c.eliminated);
-        console.log(cs);
+        cs.sort((a, b) => a.total_votes - b.total_votes);
 
         if(cs[cs.length -1].total_votes > this.quota) {
             this.transfer_votes(cs[cs.length - 1]);
@@ -378,19 +373,35 @@ class Ward {
             (candidate.total_votes - this.get_non_transferable_votes(candidate)));
 
         // Giving all candidates placeholder values for new stage
-        this.candidates.forEach((c) => c.votes[this.stage-1] = 0)
+        this.candidates.filter((c) => c.eliminated || c.total_votes < this.quota)
+            .forEach((c) => c.votes[this.stage-1] = 0)
 
         candidate.votes[this.stage - 1] = -surplus_votes;
 
-        // Only data where that candidate was first preference and there were more than the single preference
-        let stage_data = this.data.filter((v) => v[1] === candidate.number && v.length > 2);
+        // Only data where that candidate was first preference and there was more than the single preference
+        let stage_data = this.data
+            .filter((v) => v[1] === candidate.number && v.length > 2);
 
-        stage_data.forEach((s) => this.candidates.filter((c) => c.eliminated).forEach((e) => removeElement(s, e.number)));
+        const cs = this.candidates
+            .filter((c) => !c.eliminated && c.total_votes >= this.quota)
+            .map((c) => c.number);
+
+        // Remove from data any references to eliminated or already successful candidates
+        for(let i = 0; i < stage_data.length; i++) {
+            let row = stage_data[i].slice(1);
+            cs.forEach((cs) => stage_data[i] = [stage_data[i][0]].concat(removeElement(row, cs)));
+
+        }
+
+        // These are non-transferable votes being dumped, should be recorded
+        // TODO
+
+        stage_data = stage_data.filter((s) => s.length > 1);
 
         // x preference round
         for(let i = 0; i < stage_data.length; i++) {
             // Array element 3. will give second preference
-            let c = stage_data[i][2];
+            let c = stage_data[i].slice(1).shift();
 
             this.get_candidate(c).votes[this.stage - 1] += toFixedFive(stage_data[i][0] * weight);
             // Bloody javascript
@@ -425,8 +436,8 @@ class Ward {
                         .text((d) => (Math.floor(d.votes) +
                             " votes from " + this.get_candidate(this.stage_candidate).name)),
                 update => update
-                    .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
-                    .attr("width", (d) => this.canvas.x(d.cumulative_votes)),
+                    .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 ),
+                    //.attr("width", (d) => this.canvas.x(d.cumulative_votes)),
                 exit => exit
                     .remove())
 
@@ -434,6 +445,7 @@ class Ward {
 
         d3.select("#subheader")
             .text("Transferring " + surplus_votes + " surplus votes from " + candidate.name + ".");
+
     }
 
     eliminate_candidate(candidate_number) {
@@ -443,22 +455,33 @@ class Ward {
 
         let stage_data = this.data.filter((v) => v[1] === eliminated_candidate.number && v.length > 2);
 
+        const cs = this.candidates
+            .filter((c) => !c.eliminated && c.total_votes >= this.quota)
+            .map((c) => c.number);
+
+        // Remove from data any references to eliminated or already successful candidates
+        for(let i = 0; i < stage_data.length; i++) {
+            let row = stage_data[i].slice(1);
+            cs.forEach((cs) => stage_data[i] = [stage_data[i][0]].concat(removeElement(row, cs)));
+
+        }
+
+        stage_data = stage_data.filter((s) => s.length > 2);
+
         // Giving all candidates placeholder values for new stage
-        this.candidates.forEach((c) => c.votes[this.stage-1] = 0)
+        this.candidates.filter((c) => c.eliminated || c.total_votes < this.quota)
+            .forEach((c) => c.votes[this.stage - 1] = 0)
 
         // x preference round,
         // data is formatted so
         // [1, 10, 8, 4, 5, 6, 2, 9, 1, 3, 7], where
         //
         for(let i = 0; i < stage_data.length; i++) {
-            const first_valid_preference = stage_data[i].slice(1).findIndex((c) => !this.get_candidate(c).eliminated);
-            let c = stage_data[i][first_valid_preference]; //[2];
+            let c = stage_data[i].slice(2).shift();
 
             this.get_candidate(c).votes[this.stage - 1] += stage_data[i][0];
 
         }
-
-        stage_data.forEach((s) => this.candidates.filter((c) => c.eliminated).forEach((e) => removeElement(s, e.number)));
 
         const data = this.get_data();
 
@@ -481,23 +504,35 @@ class Ward {
                         .attr("height", this.canvas.y.bandwidth())
                         .attr("fill", (d) => getBackgroundColor(this.get_candidate(this.stage_candidate).party))
                         .attr("x", (d) => this.canvas.x(d.cumulative_votes))
-                        .attr("width", (d) => this.canvas.x(d.votes)),
+                        .attr("width", 0)
+                        .call((enter) => enter
+                            .transition(this.canvas.transition).attr("width", (d) => this.canvas.x(d.votes)))
+                        .append("title")
+                        .text((d) => (Math.floor(d.votes) +
+                            " votes from " + this.get_candidate(this.stage_candidate).name)),
                 update => update
                     .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
                     .attr("height", this.canvas.y.bandwidth())
-                    .attr("width", (d) => this.canvas.x(d.votes)),
+                    .attr("width", (d) => (this.canvas.x(d.votes) > 0) ? this.canvas.x(d.votes) : 0 ),
                 exit => exit
                     .remove())
 
         this.set_labels(data);
 
         d3.select("#subheader")
-            .text("Transferring " + eliminated_candidate.number + " votes from eliminated candidate " + eliminated_candidate.name + ".");
+            .text("Transferring " + Math.floor(eliminated_candidate.total_votes) +
+                " votes from eliminated candidate " + eliminated_candidate.name + ".");
+
+        if(this.candidates.filter((c) => !c.eliminated).length === this.seats) {
+            d3.select("#button").style("display", "none");
+            d3.select("#info").text("All " + this.seats + " seats filled in stage " + this.stage + ".");
+        }
     }
 }
 
-ward = new Ward("Hazlehead-Queens_Cross-Countesswells.dat")
+//ward = new Ward("Hazlehead-Queens_Cross-Countesswells.dat")
 //ward = new Ward("Torry-Ferryhill.dat")
 //ward = new Ward("Southside-Newington.dat")
+ward = new Ward("data/Bridge_of_Don.dat")
 console.log(ward);
 
