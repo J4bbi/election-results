@@ -32,6 +32,13 @@ function getBackgroundColor(party) {
         return "gray"
 }
 
+function getPartyName(party) {
+    if(party in parties)
+        return parties[party].name
+    else
+        return "Other"
+}
+
 function toFixedFive(number) {
     return +number.toFixed(5);
 }
@@ -142,7 +149,10 @@ class Ward {
             .scale(this.canvas.y)
             .tickSize(0);
 
-        this.canvas.gy.transition(this.canvas.transition).call(this.canvas.yAxis);
+        this.canvas.gy.transition()
+            .duration(2000)
+            .ease(d3.easeExpOut)
+            .call(this.canvas.yAxis);
     }
 
     set_labels(data) {
@@ -224,7 +234,9 @@ class Ward {
     */
 
     prepare_canvas() {
-        this.canvas.transition =
+        this.canvas.transition = svg.transition()
+            .duration(2000)
+            .ease(d3.easeExpOut);
 
         this.canvas.g = svg.append("g")
             .attr("transform", "translate(0,10)")
@@ -320,7 +332,8 @@ class Ward {
                 .transition(this.canvas.transition)
                 .attr("width", (d) => this.canvas.x(this.get_candidate(d.candidate).total_votes)))
             .append("title")
-            .text((d) => this.get_candidate(d.candidate).total_votes + " first preference votes");
+            .text((d) => this.get_candidate(d.candidate).total_votes + " first preference votes for " +
+               getPartyName(this.get_candidate(d.candidate).party));
 
         enter.append("text")
             .attr("class", "label")
@@ -431,20 +444,27 @@ class Ward {
                         .attr("x", (d) => this.canvas.x(d.cumulative_votes))
                         .attr("width", 0)
                         .call((enter) => enter
-                            .transition(this.canvas.transition).attr("width", (d) => this.canvas.x(d.votes)))
+                            .transition()
+                            .duration(2000)
+                            .ease(d3.easeExpOut)
+                            .attr("width", (d) => this.canvas.x(d.votes)))
                         .append("title")
                         .text((d) => (Math.floor(d.votes) +
                             " votes from " + this.get_candidate(this.stage_candidate).name)),
                 update => update
-                    .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 ),
-                    //.attr("width", (d) => this.canvas.x(d.cumulative_votes)),
+                    .attr("y", (d) => this.canvas.y(this.get_candidate(d.candidate).name) + 30 )
+                    .call((enter) => enter
+                        .transition()
+                        .duration(2000)
+                        .ease(d3.easeExpOut)
+                        .attr("width", (d) => this.canvas.x(d.votes))),
                 exit => exit
                     .remove())
 
         this.set_labels(data);
 
         d3.select("#subheader")
-            .text("Transferring " + surplus_votes + " surplus votes from " + candidate.name + ".");
+            .text("Transferring " + Math.floor(surplus_votes) + " surplus votes from " + candidate.name + ".");
 
     }
 
@@ -490,7 +510,15 @@ class Ward {
         let enter = this.canvas.bars
             .selectAll("g")
             .data(data, (d) => d.number)
-            .join("g")
+            .join(enter => enter,
+                update => update,
+                exit => exit
+                    .style("fill", "red")
+                    .call((exit) => exit
+                        .transition()
+                        .duration(20000)
+                        .ease(d3.easeExpOut).style("fill", "pink"))
+                    .remove())
             .attr("id", (d) => "candidate-" + d.number);
 
         enter.selectAll("rect")
@@ -506,7 +534,9 @@ class Ward {
                         .attr("x", (d) => this.canvas.x(d.cumulative_votes))
                         .attr("width", 0)
                         .call((enter) => enter
-                            .transition(this.canvas.transition).attr("width", (d) => this.canvas.x(d.votes)))
+                            .transition()
+                            .duration(2000)
+                            .ease(d3.easeExpOut).attr("width", (d) => this.canvas.x(d.votes)))
                         .append("title")
                         .text((d) => (Math.floor(d.votes) +
                             " votes from " + this.get_candidate(this.stage_candidate).name)),
@@ -515,6 +545,12 @@ class Ward {
                     .attr("height", this.canvas.y.bandwidth())
                     .attr("width", (d) => (this.canvas.x(d.votes) > 0) ? this.canvas.x(d.votes) : 0 ),
                 exit => exit
+                    .attr("stroke-width", 1)
+                    .attr("width", 10)
+                    .call((exit) => exit.transition()
+                        .duration(2000)
+                        .ease(d3.easeExpOut)
+                        .attr("width", 1000))
                     .remove())
 
         this.set_labels(data);
@@ -524,15 +560,24 @@ class Ward {
                 " votes from eliminated candidate " + eliminated_candidate.name + ".");
 
         if(this.candidates.filter((c) => !c.eliminated).length === this.seats) {
+            /*let cs = this.candidates.filter((c) => !c.eliminated);
+            cs.sort((a, b) => a.total_votes - b.total_votes);
+
+            this.transfer_votes(cs[cs.length - 1]);*/
+
             d3.select("#button").style("display", "none");
             d3.select("#info").text("All " + this.seats + " seats filled in stage " + this.stage + ".");
         }
     }
 }
 
+//ward = new Ward("data/Almond.dat")
 //ward = new Ward("Hazlehead-Queens_Cross-Countesswells.dat")
-//ward = new Ward("Torry-Ferryhill.dat")
-//ward = new Ward("Southside-Newington.dat")
-ward = new Ward("data/Bridge_of_Don.dat")
+//ward = new Ward("data/Torry-Ferryhill.dat")
+//ward = new Ward("data/Greater_Pollok.dat")
+//ward = new Ward("data/Leith_Walk.dat")
+//ward = new Ward("data/Craigentinny-Duddingston.dat")
+ward = new Ward("data/Southside-Newington-2017 (2).dat")
+
 console.log(ward);
 
